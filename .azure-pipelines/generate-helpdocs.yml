@@ -1,0 +1,90 @@
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
+
+# Generates a release build artifact (nuget) from HEAD of master for auth module.
+parameters:
+  - name: BRANCH
+    displayName: 'Branch'
+    type: string
+    default: 'generate-helpdocs'
+  - name: GitUserEmail
+    displayName: 'Git User Email'
+    default: 'GraphTooling@service.microsoft.com'
+    type: string
+  - name: GitUserName
+    displayName: 'Git User Name'
+    type: string
+    default: 'Microsoft Graph DevX Tooling'
+  - name: BaseBranch
+    type: string
+    default: 'dev'
+    displayName: 'Base Branch'
+
+jobs:
+- job: MSGraphPSSDKHelpDocsGeneration
+  displayName:  Microsoft Graph PowerShell SDK Roll-Up Module Generation
+  pool: MsGraphDevXAzureAgents
+  timeoutInMinutes: 600
+  condition: and(succeeded(), eq(eq(variables['Build.SourceBranch'], 'refs/heads/master'), false))
+
+  steps:
+  - checkout: self
+    persistCredentials: true
+  - template: ./install-tools-template.yml
+
+  - task: PowerShell@2
+    displayName: "Compute Branch"
+    inputs:
+      targetType: inline
+      script: |
+        $branch = "{0}.{1}" -f "generate-helpdocs", (Get-Date -Format yyyyMMdd)
+        Write-Host "##vso[task.setvariable variable=BRANCH;]$branch"
+
+  - task: PowerShell@2
+    displayName: "Configure User"
+    inputs:
+      targetType: 'inline'
+      script: |
+        git config --global user.email '$(GitUserEmail)'
+        git config --global user.name '$(GitUserName)'
+
+  - task: PowerShell@2
+    displayName: Generate Docs
+    continueOnError: false
+    inputs:
+      targetType: 'inline'
+      pwsh: true
+      script: | 
+        pwsh $(System.DefaultWorkingDirectory)/tools/GenerateHelpDocs.ps1 -RepositoryName "LocalNugetFeed"
+
+  - task: Bash@3
+    displayName : "Create PR"
+    inputs:
+      targetType: 'inline'
+      script: |
+          git status
+          git checkout $(BaseBranch)
+          git branch $(BRANCH)
+          git checkout $(BRANCH)
+          git status
+
+  - task: Bash@3
+    displayName : "Commit Downloaded Files"
+    env: 
+      GITHUB_TOKEN: $(GITHUB_TOKEN)
+    inputs:
+      targetType: 'inline'
+      script: |
+        git config --global user.email 'GraphTooling@service.microsoft.com'
+        git config --global user.name 'Microsoft Graph DevX Tooling'
+        git status
+        git add .
+        git commit -m 'Docs Generation'
+        git status
+        git push --set-upstream origin $(BRANCH)
+        git status
+
+# References
+# [0] https://help.github.com/en/actions/configuring-and-managing-workflows/using-environment-variables
+# [1] https://hub.github.com/hub-pull-request.1.html
+# https://help.github.com/en/actions/configuring-and-managing-workflows/authenticating-with-the-github_token
